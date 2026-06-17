@@ -277,7 +277,9 @@ export function updateUsageRecords(): void {
     }[];
 
     const users = database.prepare(`
-      SELECT full_name FROM users WHERE role = 'unit' LIMIT 10
+      SELECT u.full_name FROM users u 
+      JOIN roles r ON u.role_id = r.id 
+      WHERE r.level = 'unit' LIMIT 10
     `).all() as { full_name: string }[];
 
     const usageStmt = database.prepare(`

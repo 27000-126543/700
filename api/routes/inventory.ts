@@ -6,11 +6,17 @@ import { success, paginated } from '../utils/response';
 const router = Router();
 
 router.get('/', (req, res) => {
-  const { labId, category, page = 1, pageSize = 20 } = req.query;
+  const { labId, category, ids, page = 1, pageSize = 20 } = req.query;
 
   let where = '1=1';
   const params: any[] = [];
 
+  if (ids) {
+    const idList = Array.isArray(ids) ? ids : String(ids).split(',');
+    const placeholders = idList.map(() => '?').join(',');
+    where += ` AND id IN (${placeholders})`;
+    params.push(...idList);
+  }
   if (labId) {
     where += ' AND lab_id = ?';
     params.push(labId);
@@ -32,12 +38,17 @@ router.get('/', (req, res) => {
     )
     .all(...params, parseInt(pageSize as string), offset)
     .map((item: any) => ({
-      ...item,
+      id: item.id,
+      labId: item.lab_id,
+      labName: item.lab_name,
+      chemicalName: item.chemical_name,
       casNo: item.cas_no,
+      category: item.category,
       hazardLevel: item.hazard_level,
       currentStock: item.current_stock,
       safeLevel: item.safe_level,
       maxCapacity: item.max_capacity,
+      unit: item.unit,
       turnoverRate: item.turnover_rate,
       lastRestock: item.last_restock,
       supplierId: item.supplier_id,
@@ -45,7 +56,11 @@ router.get('/', (req, res) => {
       updatedAt: item.updated_at,
     }));
 
-  paginated(res, items, total, parseInt(page as string), parseInt(pageSize as string));
+  if (ids) {
+    success(res, items);
+  } else {
+    paginated(res, items, total, parseInt(page as string), parseInt(pageSize as string));
+  }
 });
 
 router.get('/turnover', (req, res) => {
@@ -136,7 +151,7 @@ router.get('/usage-records', (req, res) => {
     params.push(labId);
   }
 
-  where += ' AND timestamp >= DATE("now", "-' + parseInt(days as string) + ' days")';
+  where += ` AND timestamp >= DATE('now', '-${parseInt(days as string)} days')`;
 
   const countStmt = db.prepare(
     `SELECT COUNT(*) as count FROM usage_records WHERE ${where}`,

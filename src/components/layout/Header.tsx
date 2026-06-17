@@ -42,7 +42,7 @@ export default function Header() {
 
   const fetchRecentAlerts = useCallback(async () => {
     try {
-      const data = await api.get<{ items: AlertType[]; total: number }>('/api/alerts', {
+      const data = await api.get<{ items: AlertType[]; total: number }>('/alerts', {
         status: 'pending',
         pageSize: 10,
       });
@@ -69,7 +69,7 @@ export default function Header() {
     if (!currentProvince) return;
     setLoadingUnits(true);
     try {
-      const data = await api.get<UnitInfo[]>('/api/common/units', { provinceCode: currentProvince });
+      const data = await api.get<UnitInfo[]>('/common/units', { provinceCode: currentProvince });
       setUnits(data);
     } catch (err) {
       console.error('加载单位列表失败:', err);

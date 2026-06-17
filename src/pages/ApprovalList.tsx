@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   ClipboardCheck,
   Clock,
@@ -77,55 +77,51 @@ export default function ApprovalList() {
   const [searchText, setSearchText] = useState('');
   const [sealedChemicals, setSealedChemicals] = useState<ChemicalInventory[]>([]);
   const [chemicalsLoading, setChemicalsLoading] = useState(false);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    fetchApprovals();
-  }, [statusFilter, stepFilter]);
-
-  const fetchApprovals = async () => {
+  const fetchApprovals = useCallback(async () => {
     try {
       setLoading(true);
       const params: Record<string, unknown> = { pageSize: 100 };
       if (statusFilter !== 'all') params.status = statusFilter;
       if (stepFilter !== 'all') params.currentStep = stepFilter;
-      if (searchText) params.keyword = searchText;
-      const data = await api.get<{ items: ApprovalFlow[]; total: number }>('/api/approvals', params);
+      if (searchText.trim()) params.keyword = searchText.trim();
+      const data = await api.get<{ items: ApprovalFlow[]; total: number }>('/approvals', params);
       setApprovals(data.items || []);
     } catch (error) {
       console.error('获取审批列表失败:', error);
     } finally {
       setLoading(false);
     }
+  }, [statusFilter, stepFilter, searchText]);
+
+  useEffect(() => {
+    fetchApprovals();
+  }, [fetchApprovals]);
+
+  const handleSearchChange = (value: string) => {
+    setSearchText(value);
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => {
+      fetchApprovals();
+    }, 300);
   };
 
   const fetchSealedChemicals = async (chemicalIds: string[]) => {
-    if (!chemicalIds.length) return;
+    if (!chemicalIds || chemicalIds.length === 0) return;
     try {
       setChemicalsLoading(true);
-      const data = await api.get<ChemicalInventory[]>('/api/chemicals', { ids: chemicalIds });
-      setSealedChemicals(data);
+      const data = await api.get<ChemicalInventory[]>('/inventory', { ids: chemicalIds.join(',') });
+      setSealedChemicals(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error('获取封存化学品失败:', error);
+      setSealedChemicals([]);
     } finally {
       setChemicalsLoading(false);
     }
   };
 
-  const filteredApprovals = useMemo(() => {
-    return approvals.filter((item) => {
-      if (statusFilter !== 'all' && item.status !== statusFilter) return false;
-      if (stepFilter !== 'all' && item.currentStep !== stepFilter) return false;
-      if (searchText) {
-        const searchLower = searchText.toLowerCase();
-        return (
-          item.alertInfo.title.toLowerCase().includes(searchLower) ||
-          item.alertInfo.labName.toLowerCase().includes(searchLower) ||
-          item.alertInfo.unitName.toLowerCase().includes(searchLower)
-        );
-      }
-      return true;
-    });
-  }, [approvals, statusFilter, stepFilter, searchText]);
+  const filteredApprovals = approvals;
 
   const canOperate = (approval: ApprovalFlow): boolean => {
     if (!user || approval.status !== 'pending') return false;
@@ -152,7 +148,7 @@ export default function ApprovalList() {
   const handleApprove = async (approval: ApprovalFlow) => {
     try {
       setActionLoading(true);
-      await api.post(`/api/approvals/${approval.id}/operate`, {
+      await api.post(`/approvals/${approval.id}/operate`, {
         action: 'approve',
         step: approval.currentStep,
         operatorId: user?.id,
@@ -171,7 +167,7 @@ export default function ApprovalList() {
     if (!selectedApproval || !rejectReason.trim()) return;
     try {
       setActionLoading(true);
-      await api.post(`/api/approvals/${selectedApproval.id}/operate`, {
+      await api.post(`/approvals/${selectedApproval.id}/operate`, {
         action: 'reject',
         step: selectedApproval.currentStep,
         operatorId: user?.id,
@@ -275,7 +271,7 @@ export default function ApprovalList() {
               type="text"
               placeholder="搜索预警标题、实验室、单位名称..."
               value={searchText}
-              onChange={(e) => setSearchText(e.target.value)}
+              onChange={(e) => handleSearchChange(e.target.value)}
               className="input-field pl-10"
             />
           </div>

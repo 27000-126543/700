@@ -21,6 +21,7 @@ import {
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import StatCard from '@/components/common/StatCard';
+import { useAppStore } from '@/store/appStore';
 import type { Alert, AlertLevel, AlertStatus, AlertType, PaginatedResponse, ApprovalFlow } from '@shared/types';
 import dayjs from 'dayjs';
 
@@ -65,6 +66,7 @@ interface AlertDetail extends Alert {
 }
 
 export default function AlertList() {
+  const { setUnreadAlerts } = useAppStore();
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
@@ -178,6 +180,16 @@ export default function AlertList() {
       setSelectedIds(new Set());
       setHandleNote('');
       fetchAlerts();
+      
+      try {
+        const pendingData = await api.get<{ items: Alert[]; total: number }>('/alerts', {
+          status: 'pending',
+          pageSize: 1,
+        });
+        setUnreadAlerts(pendingData.total || 0);
+      } catch (e) {
+        console.error('刷新未读预警数失败:', e);
+      }
     } catch (err) {
       console.error('处置失败:', err);
       alert('处置失败，请重试');

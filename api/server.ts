@@ -9,35 +9,52 @@ import { startSimulation, stopSimulation } from './services/simulator.js';
  */
 const PORT = process.env.PORT || 3001;
 
-const server = app.listen(PORT, () => {
-  console.log(`Server ready on port ${PORT}`);
-  
-  try {
-    startSimulation();
-  } catch (error) {
-    console.error('Failed to start simulation:', error);
+process.on('uncaughtException', (err: Error) => {
+  if ('code' in err && (err as any).code === 'EADDRINUSE') {
+    console.error(`Port ${PORT} is already in use. Trying port ${Number(PORT) + 1}...`);
+    const newPort = Number(PORT) + 1;
+    startServer(newPort);
+  } else {
+    console.error('Uncaught Exception:', err);
   }
 });
 
-/**
- * close server
- */
-process.on('SIGTERM', () => {
-  console.log('SIGTERM signal received');
-  stopSimulation();
-  server.close(() => {
-    console.log('Server closed');
-    process.exit(0);
-  });
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection:', reason);
 });
 
-process.on('SIGINT', () => {
-  console.log('SIGINT signal received');
-  stopSimulation();
-  server.close(() => {
-    console.log('Server closed');
-    process.exit(0);
+function startServer(port: number) {
+  const server = app.listen(port, () => {
+    console.log(`Server ready on port ${port}`);
+    
+    setTimeout(() => {
+      try {
+        startSimulation();
+      } catch (error) {
+        console.error('Failed to start simulation:', error);
+      }
+    }, 2000);
   });
-});
+
+  process.on('SIGTERM', () => {
+    console.log('SIGTERM signal received');
+    stopSimulation();
+    server.close(() => {
+      console.log('Server closed');
+      process.exit(0);
+    });
+  });
+
+  process.on('SIGINT', () => {
+    console.log('SIGINT signal received');
+    stopSimulation();
+    server.close(() => {
+      console.log('Server closed');
+      process.exit(0);
+    });
+  });
+}
+
+startServer(Number(PORT));
 
 export default app;

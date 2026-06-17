@@ -41,7 +41,7 @@ export function updateSensorData(): void {
   try {
     const database = getDb();
     
-    const sensors = database.prepare('SELECT id, type, lab_id, threshold FROM sensors').all() as {
+    const sensors = database.prepare('SELECT id, type, lab_id, threshold FROM sensors ORDER BY RANDOM() LIMIT 100').all() as {
       id: string;
       type: string;
       lab_id: string;
@@ -54,22 +54,15 @@ export function updateSensorData(): void {
       WHERE id = ?
     `);
 
-    const insertStmt = database.prepare(`
-      INSERT INTO sensor_data (id, lab_id, sensor_id, type, value, unit, threshold, status, timestamp)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
     const now = dayjs().toISOString();
 
     for (const sensor of sensors) {
       let value: number;
       let status: 'normal' | 'warning' | 'alarm';
-      let unit: string;
 
       const anomalyChance = Math.random();
 
       if (sensor.type === 'temperature') {
-        unit = '°C';
         if (anomalyChance < 0.03) {
           value = randomInRange(35, 50);
           status = 'alarm';
@@ -81,7 +74,6 @@ export function updateSensorData(): void {
           status = 'normal';
         }
       } else if (sensor.type === 'humidity') {
-        unit = '%RH';
         if (anomalyChance < 0.03) {
           value = randomInRange(75, 95);
           status = 'alarm';
@@ -93,7 +85,6 @@ export function updateSensorData(): void {
           status = 'normal';
         }
       } else {
-        unit = 'ppm';
         if (anomalyChance < 0.02) {
           value = randomInRange(sensor.threshold * 1.5, sensor.threshold * 3);
           status = 'alarm';
@@ -107,19 +98,6 @@ export function updateSensorData(): void {
       }
 
       updateStmt.run(value.toFixed(2), status, now, sensor.id);
-
-      const dataId = generateUniqueId('sd');
-      insertStmt.run(
-        dataId,
-        sensor.lab_id,
-        sensor.id,
-        sensor.type,
-        value,
-        unit,
-        sensor.threshold,
-        status,
-        now
-      );
 
       if (status === 'alarm') {
         generateLeakAlert(sensor.lab_id, sensor.id, sensor.type, value);
@@ -247,12 +225,12 @@ export function checkAlertEscalation(): void {
       ];
 
       const stepStmt = database.prepare(`
-        INSERT INTO approval_steps (flow_id, step, role, status)
-        VALUES (?, ?, ?, 'pending')
+        INSERT INTO approval_steps (id, flow_id, step, role, status)
+        VALUES (?, ?, ?, ?, 'pending')
       `);
 
       for (const s of steps) {
-        stepStmt.run(approvalId, s.step, s.role);
+        stepStmt.run(`stp_${Date.now()}_${randomInt(1000, 9999)}_${s.step}`, approvalId, s.step, s.role);
       }
 
       const chemicals = database.prepare(`
@@ -304,7 +282,7 @@ export function updateUsageRecords(): void {
 
     const usageStmt = database.prepare(`
       INSERT INTO usage_records (id, lab_id, lab_name, chemical_id, chemical_name, 
-                                  amount, unit, user_name, double_lock_verified, 
+                                  amount, unit, user, double_lock_verified, 
                                   lock_operator1, lock_operator2, purpose, timestamp)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
@@ -490,19 +468,19 @@ export function startSimulation(): void {
   checkAlertEscalation();
   updateLabRiskScores();
 
-  sensorInterval = setInterval(updateSensorData, 10000);
+  sensorInterval = setInterval(updateSensorData, 15000);
   
-  escalationInterval = setInterval(checkAlertEscalation, 30000);
+  escalationInterval = setInterval(checkAlertEscalation, 60000);
   
-  usageInterval = setInterval(updateUsageRecords, 30000);
+  usageInterval = setInterval(updateUsageRecords, 45000);
   
-  riskScoreInterval = setInterval(updateLabRiskScores, 60000);
+  riskScoreInterval = setInterval(updateLabRiskScores, 120000);
 
   console.log('Simulation started successfully');
-  console.log('- Sensor data updates: every 10 seconds');
-  console.log('- Alert escalation checks: every 30 seconds');
-  console.log('- Usage record generation: every 30 seconds');
-  console.log('- Risk score updates: every 60 seconds');
+  console.log('- Sensor data updates: every 15 seconds');
+  console.log('- Alert escalation checks: every 60 seconds');
+  console.log('- Usage record generation: every 45 seconds');
+  console.log('- Risk score updates: every 120 seconds');
 }
 
 export function stopSimulation(): void {

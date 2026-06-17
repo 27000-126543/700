@@ -80,13 +80,17 @@ export default function ApprovalList() {
 
   useEffect(() => {
     fetchApprovals();
-  }, []);
+  }, [statusFilter, stepFilter]);
 
   const fetchApprovals = async () => {
     try {
       setLoading(true);
-      const data = await api.get<ApprovalFlow[]>('/api/approvals');
-      setApprovals(data);
+      const params: Record<string, unknown> = { pageSize: 100 };
+      if (statusFilter !== 'all') params.status = statusFilter;
+      if (stepFilter !== 'all') params.currentStep = stepFilter;
+      if (searchText) params.keyword = searchText;
+      const data = await api.get<{ items: ApprovalFlow[]; total: number }>('/api/approvals', params);
+      setApprovals(data.items || []);
     } catch (error) {
       console.error('获取审批列表失败:', error);
     } finally {
@@ -148,9 +152,11 @@ export default function ApprovalList() {
   const handleApprove = async (approval: ApprovalFlow) => {
     try {
       setActionLoading(true);
-      await api.put(`/api/approvals/${approval.id}/approve`, {
+      await api.post(`/api/approvals/${approval.id}/operate`, {
         action: 'approve',
         step: approval.currentStep,
+        operatorId: user?.id,
+        operatorName: user?.fullName,
       });
       await fetchApprovals();
       setShowDetailModal(false);
@@ -165,9 +171,11 @@ export default function ApprovalList() {
     if (!selectedApproval || !rejectReason.trim()) return;
     try {
       setActionLoading(true);
-      await api.put(`/api/approvals/${selectedApproval.id}/approve`, {
+      await api.post(`/api/approvals/${selectedApproval.id}/operate`, {
         action: 'reject',
         step: selectedApproval.currentStep,
+        operatorId: user?.id,
+        operatorName: user?.fullName,
         comment: rejectReason.trim(),
       });
       await fetchApprovals();

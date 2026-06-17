@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Bell,
   Search,
@@ -9,6 +10,7 @@ import {
   User,
   MapPin,
   Building2,
+  CheckCircle,
 } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
 import { api } from '@/lib/api';
@@ -16,6 +18,7 @@ import type { Alert as AlertType, Province, UnitInfo } from '@shared/types';
 import { cn } from '@/lib/utils';
 
 export default function Header() {
+  const navigate = useNavigate();
   const {
     user,
     logout,
@@ -37,6 +40,25 @@ export default function Header() {
   const [loadingUnits, setLoadingUnits] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
+  const fetchRecentAlerts = useCallback(async () => {
+    try {
+      const data = await api.get<{ items: AlertType[]; total: number }>('/api/alerts', {
+        status: 'pending',
+        pageSize: 10,
+      });
+      setAlerts(data.items || []);
+      setUnreadAlerts(data.total || 0);
+    } catch (err) {
+      console.error('加载预警列表失败:', err);
+    }
+  }, [setUnreadAlerts]);
+
+  useEffect(() => {
+    fetchRecentAlerts();
+    const interval = setInterval(fetchRecentAlerts, 30000);
+    return () => clearInterval(interval);
+  }, [fetchRecentAlerts]);
+
   useEffect(() => {
     if (currentProvince) {
       loadUnits();
@@ -47,7 +69,7 @@ export default function Header() {
     if (!currentProvince) return;
     setLoadingUnits(true);
     try {
-      const data = await api.get<UnitInfo[]>('/units', { provinceCode: currentProvince });
+      const data = await api.get<UnitInfo[]>('/api/common/units', { provinceCode: currentProvince });
       setUnits(data);
     } catch (err) {
       console.error('加载单位列表失败:', err);
@@ -58,6 +80,7 @@ export default function Header() {
 
   const handleProvinceChange = (province: Province | null) => {
     setCurrentProvince(province?.code || null);
+    setCurrentUnit(null);
     setShowProvinceSelect(false);
   };
 
@@ -71,6 +94,11 @@ export default function Header() {
     setShowUserMenu(false);
   };
 
+  const handleViewAllAlerts = () => {
+    setShowAlerts(false);
+    navigate('/alerts');
+  };
+
   const currentProvinceName = provinces.find((p) => p.code === currentProvince)?.name;
   const currentUnitName = units.find((u) => u.id === currentUnit)?.name;
 
@@ -82,6 +110,13 @@ export default function Header() {
   const levelIcons: Record<number, typeof AlertCircle> = {
     1: AlertTriangle,
     2: AlertCircle,
+  };
+
+  const typeLabels: Record<string, string> = {
+    leak: '泄漏',
+    temperature: '超温',
+    humidity: '超湿',
+    low_stock: '库存不足',
   };
 
   return (
@@ -225,6 +260,7 @@ export default function Header() {
               setShowProvinceSelect(false);
               setShowUnitSelect(false);
               setShowUserMenu(false);
+              if (!showAlerts) fetchRecentAlerts();
             }}
             className="relative p-2 rounded-lg hover:bg-surface-light transition-colors"
           >
@@ -238,30 +274,41 @@ export default function Header() {
 
           {showAlerts && (
             <div className="absolute top-full right-0 mt-2 w-96 bg-surface-card border border-surface-border rounded-xl shadow-card z-50">
-              <div className="p-4 border-b border-surface-border">
-                <h3 className="font-semibold text-white">预警通知</h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  共 {unreadAlerts} 条未处理预警
-                </p>
+              <div className="p-4 border-b border-surface-border flex items-center justify-between">
+                <div>
+                  <h3 className="font-semibold text-white">预警通知</h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    共 {unreadAlerts} 条未处理预警
+                  </p>
+                </div>
+                {unreadAlerts > 0 && (
+                  <span className="px-2 py-0.5 text-xs bg-accent-danger/20 text-accent-danger rounded-full">
+                    {unreadAlerts} 条待处理
+                  </span>
+                )}
               </div>
               <div className="max-h-80 overflow-y-auto">
                 {alerts.length === 0 ? (
                   <div className="p-8 text-center text-slate-500">
-                    <Bell className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                    <p>暂无预警通知</p>
+                    <CheckCircle className="w-12 h-12 mx-auto mb-3 text-accent-safe/30" />
+                    <p>暂无未处理预警</p>
+                    <p className="text-xs text-slate-600 mt-1">所有预警均已处理</p>
                   </div>
                 ) : (
                   <div className="p-2 space-y-1">
                     {alerts.slice(0, 10).map((alert) => {
-                      const LevelIcon = levelIcons[alert.level];
+                      const LevelIcon = levelIcons[alert.level] || AlertTriangle;
                       return (
                         <div
                           key={alert.id}
                           className={cn(
                             'p-3 rounded-lg border transition-colors cursor-pointer hover:bg-surface-light',
-                            levelColors[alert.level],
-                            alert.status === 'pending' ? 'animate-pulse-slow' : '',
+                            levelColors[alert.level] || levelColors[1],
                           )}
+                          onClick={() => {
+                            setShowAlerts(false);
+                            navigate('/alerts');
+                          }}
                         >
                           <div className="flex items-start gap-3">
                             <LevelIcon className="w-5 h-5 flex-shrink-0 mt-0.5" />
@@ -270,10 +317,25 @@ export default function Header() {
                               <div className="text-xs opacity-80 mt-0.5">
                                 {alert.unitName} - {alert.labName}
                               </div>
-                              <div className="text-xs opacity-60 mt-1">
-                                {new Date(alert.createdAt).toLocaleString('zh-CN')}
+                              <div className="flex items-center gap-2 mt-1">
+                                {alert.type && typeLabels[alert.type] && (
+                                  <span className="text-xs px-1.5 py-0.5 bg-surface-light/50 rounded">
+                                    {typeLabels[alert.type]}
+                                  </span>
+                                )}
+                                <span className="text-xs opacity-60">
+                                  {new Date(alert.createdAt).toLocaleString('zh-CN')}
+                                </span>
                               </div>
                             </div>
+                            <span className={cn(
+                              'text-xs px-1.5 py-0.5 rounded font-medium',
+                              alert.level === 1
+                                ? 'bg-accent-warning/20 text-accent-warning'
+                                : 'bg-accent-danger/20 text-accent-danger'
+                            )}>
+                              {alert.level}级
+                            </span>
                           </div>
                         </div>
                       );
@@ -282,8 +344,12 @@ export default function Header() {
                 )}
               </div>
               <div className="p-3 border-t border-surface-border">
-                <button className="w-full text-sm text-primary-400 hover:text-primary-300 font-medium">
-                  查看全部预警 →
+                <button
+                  onClick={handleViewAllAlerts}
+                  className="w-full text-sm text-primary-400 hover:text-primary-300 font-medium flex items-center justify-center gap-1"
+                >
+                  查看全部预警
+                  <ChevronDown className="w-3 h-3 rotate-180" />
                 </button>
               </div>
             </div>

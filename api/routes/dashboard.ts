@@ -8,55 +8,72 @@ const router = Router();
 router.get('/overview', (req, res) => {
   const { province, unitId } = req.query;
 
+  let labJoin = ' JOIN units u ON l.unit_id = u.id JOIN provinces p ON u.province_code = p.code ';
   let labWhere = '1=1';
+  const labParams: any[] = [];
+
+  let invJoin = ' JOIN laboratories l ON ci.lab_id = l.id JOIN units u ON l.unit_id = u.id JOIN provinces p ON u.province_code = p.code ';
   let invWhere = '1=1';
+  const invParams: any[] = [];
+
   let alertWhere = '1=1';
-  const params: any[] = [];
+  const alertParams: any[] = [];
 
   if (province) {
     labWhere += ' AND u.province_code = ?';
+    labParams.push(province);
     invWhere += ' AND u.province_code = ?';
-    alertWhere += ' AND a.province = ?';
+    invParams.push(province);
     const provinceName = db.prepare('SELECT name FROM provinces WHERE code = ?').get(province) as any;
-    if (provinceName) {
-      params.push(province, province, provinceName.name);
-    } else {
-      params.push(province, province, province);
-    }
+    alertWhere += ' AND a.province = ?';
+    alertParams.push(provinceName?.name || province);
   }
 
   if (unitId) {
     labWhere += ' AND l.unit_id = ?';
+    labParams.push(unitId);
     invWhere += ' AND u.id = ?';
+    invParams.push(unitId);
     alertWhere += ' AND a.lab_id IN (SELECT id FROM laboratories WHERE unit_id = ?)';
-    params.push(unitId, unitId, unitId);
+    alertParams.push(unitId);
   }
 
   const totalInventory = db
     .prepare(
       `SELECT SUM(ci.current_stock) as total 
        FROM chemical_inventory ci 
-       JOIN laboratories l ON ci.lab_id = l.id 
-       JOIN units u ON l.unit_id = u.id 
+       ${invJoin}
        WHERE ${invWhere}`,
     )
-    .get(...params) as any;
+    .get(...invParams) as any;
 
   const labs = db
     .prepare(
       `SELECT l.*, u.name as unit_name, p.name as province_name, p.code as province_code 
        FROM laboratories l 
-       JOIN units u ON l.unit_id = u.id 
-       JOIN provinces p ON u.province_code = p.code 
+       ${labJoin}
        WHERE ${labWhere}`,
     )
-    .all(...params.slice(0, params.length - (province ? 1 : 0) - (unitId ? 1 : 0))) as any[];
+    .all(...labParams) as any[];
 
   const activeAlerts = db
     .prepare(
-      `SELECT COUNT(*) as count FROM alerts a WHERE status IN ('pending', 'processing', 'escalated') AND ${alertWhere}`,
+      `SELECT COUNT(*) as count FROM alerts a WHERE a.status IN ('pending', 'processing', 'escalated') AND ${alertWhere}`,
     )
-    .get(...params.slice(params.length - (province ? 1 : 0) - (unitId ? 1 : 0))) as any;
+    .get(...alertParams) as any;
+
+  let dlJoin = ' JOIN laboratories l ON ur.lab_id = l.id JOIN units u ON l.unit_id = u.id ';
+  let dlWhere = '1=1';
+  const dlParams: any[] = [];
+  if (province) {
+    dlWhere += ' AND u.province_code = ?';
+    dlParams.push(province);
+  }
+  if (unitId) {
+    dlWhere += ' AND u.id = ?';
+    dlParams.push(unitId);
+  }
+  dlParams.push(dayjs().subtract(7, 'day').format('YYYY-MM-DD HH:mm:ss'));
 
   const doubleLockCount = db
     .prepare(
@@ -64,12 +81,11 @@ router.get('/overview', (req, res) => {
         COUNT(*) as total,
         SUM(CASE WHEN double_lock_verified = 1 THEN 1 ELSE 0 END) as verified
        FROM usage_records ur 
-       JOIN laboratories l ON ur.lab_id = l.id 
-       JOIN units u ON l.unit_id = u.id 
-       WHERE ${invWhere.replace('u.id', 'u.id')}
+       ${dlJoin}
+       WHERE ${dlWhere}
        AND ur.timestamp >= ?`,
     )
-    .get(...params.slice(0, params.length - (province ? 1 : 0) - (unitId ? 1 : 0)), dayjs().subtract(7, 'day').format('YYYY-MM-DD HH:mm:ss')) as any;
+    .get(...dlParams) as any;
 
   success(res, {
     totalInventory: totalInventory?.total || 0,
@@ -78,7 +94,7 @@ router.get('/overview', (req, res) => {
     totalLabs: labs.length,
     activeAlerts: activeAlerts?.count || 0,
     alertsTrend: Math.floor(Math.random() * 30) - 10,
-    avgRiskScore: labs.length > 0 ? labs.reduce((sum, l) => sum + l.risk_score, 0) / labs.length : 0,
+    avgRiskScore: labs.length > 0 ? Math.round(labs.reduce((sum, l) => sum + (l.risk_score || 0), 0) / labs.length * 10) / 10 : 0,
     riskTrend: Math.floor(Math.random() * 10) - 5,
     doubleLockRate: doubleLockCount?.total > 0 ? Math.round((doubleLockCount.verified / doubleLockCount.total) * 100) : 0,
     doubleLockTrend: Math.floor(Math.random() * 10) - 3,
@@ -86,9 +102,7 @@ router.get('/overview', (req, res) => {
 });
 
 router.get('/heatmap', (req, res) => {
-  const { province } = req.query;
-
-  let sql = `
+  const data = db.prepare(`
     SELECT 
       p.code as province_code,
       p.name as province,
@@ -101,17 +115,9 @@ router.get('/heatmap', (req, res) => {
     LEFT JOIN laboratories l ON u.id = l.unit_id
     LEFT JOIN chemical_inventory ci ON l.id = ci.lab_id
     LEFT JOIN alerts a ON l.id = a.lab_id AND a.status IN ('pending', 'escalated')
-  `;
-
-  const params: any[] = [];
-  if (province) {
-    sql += ' WHERE p.code = ?';
-    params.push(province);
-  }
-
-  sql += ' GROUP BY p.code, p.name ORDER BY value DESC';
-
-  const data = db.prepare(sql).all(...params).map((item: any) => {
+    GROUP BY p.code, p.name
+    ORDER BY value DESC
+  `).all().map((item: any) => {
     let riskLevel: any = 'low';
     if (item.avg_risk >= 80) riskLevel = 'critical';
     else if (item.avg_risk >= 60) riskLevel = 'high';
@@ -187,6 +193,22 @@ router.get('/trends', (req, res) => {
   const { unitId, labId, days = 7 } = req.query;
   const numDays = parseInt(days as string);
 
+  let invWhere = '1=1';
+  const invParams: any[] = [];
+  let alertWhere = '1=1';
+  const alertParams: any[] = [];
+  let usageWhere = '1=1';
+  const usageParams: any[] = [];
+
+  if (unitId) {
+    invWhere += ' AND u.id = ?';
+    invParams.push(unitId);
+    alertWhere += ' AND a.lab_id IN (SELECT id FROM laboratories WHERE unit_id = ?)';
+    alertParams.push(unitId);
+    usageWhere += ' AND ur.lab_id IN (SELECT id FROM laboratories WHERE unit_id = ?)';
+    usageParams.push(unitId);
+  }
+
   const dates: string[] = [];
   const inventory: number[] = [];
   const events: number[] = [];
@@ -195,21 +217,33 @@ router.get('/trends', (req, res) => {
 
   for (let i = numDays - 1; i >= 0; i--) {
     const date = dayjs().subtract(i, 'day').format('YYYY-MM-DD');
+    const nextDate = dayjs().subtract(i - 1, 'day').format('YYYY-MM-DD');
     dates.push(date);
 
-    inventory.push(Math.floor(Math.random() * 5000) + 15000);
-    events.push(Math.floor(Math.random() * 10));
-    usage.push(Math.floor(Math.random() * 1000) + 2000);
-    alerts.push(Math.floor(Math.random() * 5));
+    const invResult = db.prepare(
+      `SELECT SUM(ci.current_stock) as total FROM chemical_inventory ci
+       JOIN laboratories l ON ci.lab_id = l.id JOIN units u ON l.unit_id = u.id
+       WHERE ${invWhere}`,
+    ).get(...invParams) as any;
+    inventory.push(Math.round(invResult?.total || 0));
+
+    const evtResult = db.prepare(
+      `SELECT COUNT(*) as count FROM alerts a WHERE date(a.created_at) = ? AND ${alertWhere}`,
+    ).get(date, ...alertParams) as any;
+    events.push(evtResult?.count || 0);
+
+    const usgResult = db.prepare(
+      `SELECT COUNT(*) as count FROM usage_records ur WHERE date(ur.timestamp) = ? AND ${usageWhere}`,
+    ).get(date, ...usageParams) as any;
+    usage.push(usgResult?.count || 0);
+
+    const altResult = db.prepare(
+      `SELECT COUNT(*) as count FROM alerts a WHERE date(a.created_at) = ? AND a.status IN ('pending','escalated') AND ${alertWhere}`,
+    ).get(date, ...alertParams) as any;
+    alerts.push(altResult?.count || 0);
   }
 
-  success(res, {
-    dates,
-    inventory,
-    events,
-    usage,
-    alerts,
-  });
+  success(res, { dates, inventory, events, usage, alerts });
 });
 
 router.get('/events-timeline', (req, res) => {
@@ -220,7 +254,8 @@ router.get('/events-timeline', (req, res) => {
 
   if (province) {
     where += ' AND a.province = ?';
-    params.push(province);
+    const provinceName = db.prepare('SELECT name FROM provinces WHERE code = ?').get(province) as any;
+    params.push(provinceName?.name || province);
   }
 
   const alerts = db

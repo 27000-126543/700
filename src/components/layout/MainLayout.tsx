@@ -23,7 +23,7 @@ export default function MainLayout() {
   const initData = async () => {
     try {
       if (provinces.length === 0) {
-        const data = await api.get<Province[]>('/provinces');
+        const data = await api.get<Province[]>('/common/provinces');
         setProvinces(data);
       }
     } catch (err) {
@@ -38,11 +38,20 @@ export default function MainLayout() {
 
     const fetchUnreadAlerts = async () => {
       try {
-        const data = await api.get<{ items: Alert[]; total: number }>('/alerts', {
+        const pendingData = await api.get<{ items: Alert[]; total: number }>('/alerts', {
           status: 'pending',
           pageSize: 1,
         });
-        setUnreadAlerts(data.total);
+        const processingData = await api.get<{ items: Alert[]; total: number }>('/alerts', {
+          status: 'processing',
+          pageSize: 1,
+        });
+        const escalatedData = await api.get<{ items: Alert[]; total: number }>('/alerts', {
+          status: 'escalated',
+          pageSize: 1,
+        });
+        const total = (pendingData.total || 0) + (processingData.total || 0) + (escalatedData.total || 0);
+        setUnreadAlerts(total);
       } catch (err) {
         console.error('获取未读预警失败:', err);
       }

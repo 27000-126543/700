@@ -4,7 +4,7 @@ export type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
 
 export type AlertLevel = 1 | 2;
 
-export type AlertStatus = 'pending' | 'processing' | 'resolved' | 'escalated';
+export type AlertStatus = 'pending' | 'processing' | 'resolved' | 'escalated' | 'rejected';
 
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
 

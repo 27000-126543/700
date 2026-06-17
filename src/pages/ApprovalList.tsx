@@ -26,9 +26,9 @@ import RiskBadge from '@/components/common/RiskBadge';
 import type { ApprovalFlow, ApprovalStatus, AdminLevel, ChemicalInventory } from '@shared/types';
 
 const STEP_CONFIG = {
-  1: { label: '实验员确认', icon: User, role: 'unit' as AdminLevel },
-  2: { label: '单位负责人复核', icon: Building, role: 'unit' as AdminLevel },
-  3: { label: '上级主管部门批准', icon: Building2, role: 'province' as AdminLevel },
+  1: { label: '实验员确认', icon: User, role: 'lab' as AdminLevel, permission: 'usage:create' },
+  2: { label: '单位负责人复核', icon: Building, role: 'unit' as AdminLevel, permission: 'approvals:unit' },
+  3: { label: '上级主管部门批准', icon: Building2, role: 'province' as AdminLevel, permission: 'approvals:*' },
 };
 
 const STATUS_CONFIG: Record<ApprovalStatus, { label: string; color: string; bg: string }> = {
@@ -64,7 +64,7 @@ function formatDateTime(dateStr: string): string {
 }
 
 export default function ApprovalList() {
-  const { user, getAdminLevel } = useAppStore();
+  const { user, getAdminLevel, hasPermission } = useAppStore();
   const [approvals, setApprovals] = useState<ApprovalFlow[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedApproval, setSelectedApproval] = useState<ApprovalFlow | null>(null);
@@ -125,12 +125,29 @@ export default function ApprovalList() {
 
   const canOperate = (approval: ApprovalFlow): boolean => {
     if (!user || approval.status !== 'pending') return false;
-    const userLevel = getAdminLevel();
-    const currentStepConfig = STEP_CONFIG[approval.currentStep];
     
+    const userLevel = getAdminLevel();
+    const currentStep = approval.currentStep;
+    
+    // 国家级管理员可以处理所有步骤
     if (userLevel === 'national') return true;
-    if (userLevel === 'province' && currentStepConfig.role === 'province') return true;
-    if (userLevel === 'unit' && currentStepConfig.role === 'unit') return true;
+    
+    // 省级管理员只能处理第3步
+    if (userLevel === 'province') {
+      return currentStep === 3 && hasPermission('approvals:*');
+    }
+    
+    // 单位级用户：区分单位负责人和实验员
+    if (userLevel === 'unit') {
+      // 单位负责人（有approvals:unit权限）可以处理第1、2步
+      if (hasPermission('approvals:unit')) {
+        return currentStep === 1 || currentStep === 2;
+      }
+      // 普通实验员（只有usage:create权限）只能处理第1步
+      if (hasPermission('usage:create') && !hasPermission('approvals:unit')) {
+        return currentStep === 1;
+      }
+    }
     
     return false;
   };

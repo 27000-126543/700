@@ -42,12 +42,29 @@ export default function Header() {
 
   const fetchRecentAlerts = useCallback(async () => {
     try {
-      const data = await api.get<{ items: AlertType[]; total: number }>('/alerts', {
+      const pendingData = await api.get<{ items: AlertType[]; total: number }>('/alerts', {
         status: 'pending',
-        pageSize: 10,
+        pageSize: 5,
       });
-      setAlerts(data.items || []);
-      setUnreadAlerts(data.total || 0);
+      const processingData = await api.get<{ items: AlertType[]; total: number }>('/alerts', {
+        status: 'processing',
+        pageSize: 3,
+      });
+      const escalatedData = await api.get<{ items: AlertType[]; total: number }>('/alerts', {
+        status: 'escalated',
+        pageSize: 2,
+      });
+      
+      const allItems = [
+        ...(pendingData.items || []),
+        ...(processingData.items || []),
+        ...(escalatedData.items || []),
+      ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 10);
+      
+      const totalUnread = (pendingData.total || 0) + (processingData.total || 0) + (escalatedData.total || 0);
+      
+      setAlerts(allItems);
+      setUnreadAlerts(totalUnread);
     } catch (err) {
       console.error('加载预警列表失败:', err);
     }

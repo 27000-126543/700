@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   Clock,
   CheckCircle,
+  XCircle,
   ArrowUpRight,
   Search,
   Filter,
@@ -37,6 +38,7 @@ const statusOptions: { value: AlertStatus | 'all'; label: string }[] = [
   { value: 'processing', label: '处理中' },
   { value: 'resolved', label: '已解决' },
   { value: 'escalated', label: '已升级' },
+  { value: 'rejected', label: '审批驳回' },
 ];
 
 const typeOptions: { value: AlertType | 'all'; label: string }[] = [
@@ -52,6 +54,7 @@ const statusConfig: Record<AlertStatus, { label: string; color: string; bg: stri
   processing: { label: '处理中', color: 'text-accent-gold', bg: 'bg-accent-gold/10 border-accent-gold/30' },
   resolved: { label: '已解决', color: 'text-accent-safe', bg: 'bg-accent-safe/10 border-accent-safe/30' },
   escalated: { label: '已升级', color: 'text-accent-danger', bg: 'bg-accent-danger/10 border-accent-danger/30' },
+  rejected: { label: '审批驳回', color: 'text-slate-400', bg: 'bg-slate-500/10 border-slate-500/30' },
 };
 
 const typeConfig: Record<AlertType, { label: string; icon: typeof AlertTriangle }> = {
@@ -128,9 +131,12 @@ export default function AlertList() {
       processing: 0,
       resolved: 0,
       escalated: 0,
+      rejected: 0,
     };
     alerts.forEach((alert) => {
-      stats[alert.status]++;
+      if (stats[alert.status] !== undefined) {
+        stats[alert.status]++;
+      }
     });
     return stats;
   }, [alerts]);
@@ -186,7 +192,16 @@ export default function AlertList() {
           status: 'pending',
           pageSize: 1,
         });
-        setUnreadAlerts(pendingData.total || 0);
+        const processingData = await api.get<{ items: Alert[]; total: number }>('/alerts', {
+          status: 'processing',
+          pageSize: 1,
+        });
+        const escalatedData = await api.get<{ items: Alert[]; total: number }>('/alerts', {
+          status: 'escalated',
+          pageSize: 1,
+        });
+        const total = (pendingData.total || 0) + (processingData.total || 0) + (escalatedData.total || 0);
+        setUnreadAlerts(total);
       } catch (e) {
         console.error('刷新未读预警数失败:', e);
       }
@@ -234,7 +249,7 @@ export default function AlertList() {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         <StatCard
           title="待处理"
           value={statistics.pending}
@@ -262,6 +277,13 @@ export default function AlertList() {
           icon={<ArrowUpRight className="w-5 h-5" />}
           color="red"
           subtitle="已升级审批的预警"
+        />
+        <StatCard
+          title="审批驳回"
+          value={statistics.rejected}
+          icon={<XCircle className="w-5 h-5" />}
+          color="gray"
+          subtitle="审批流程驳回的预警"
         />
       </div>
 
@@ -460,7 +482,7 @@ export default function AlertList() {
                           >
                             <AlertCircle className="w-4 h-4" />
                           </button>
-                          {alert.status !== 'resolved' && alert.status !== 'escalated' && (
+                          {alert.status !== 'resolved' && alert.status !== 'escalated' && alert.status !== 'rejected' && (
                             <button
                               onClick={() => handleOpenHandleModal(alert)}
                               className="p-1.5 text-slate-400 hover:text-accent-safe hover:bg-accent-safe/10 rounded transition-colors"
@@ -622,12 +644,27 @@ export default function AlertList() {
 
               {detailModal.alert.resolutionNote && (
                 <div>
-                  <div className="text-sm font-medium text-slate-300 mb-2">处置备注</div>
-                  <div className="bg-accent-safe/10 border border-accent-safe/30 rounded-lg p-4 text-slate-200">
+                  <div className="text-sm font-medium text-slate-300 mb-2">
+                    {detailModal.alert.status === 'rejected' ? '审批驳回备注' : '处置备注'}
+                  </div>
+                  <div className={cn(
+                    'border rounded-lg p-4 text-slate-200',
+                    detailModal.alert.status === 'rejected'
+                      ? 'bg-slate-500/10 border-slate-500/30'
+                      : 'bg-accent-safe/10 border-accent-safe/30'
+                  )}>
                     <div className="flex items-center gap-2 mb-2">
-                      <CheckCircle className="w-4 h-4 text-accent-safe" />
-                      <span className="text-sm text-accent-safe">
-                        由 {detailModal.alert.resolvedBy || '系统'} 于 {dayjs(detailModal.alert.resolvedAt).format('YYYY-MM-DD HH:mm:ss')} 处置
+                      {detailModal.alert.status === 'rejected' ? (
+                        <XCircle className="w-4 h-4 text-slate-400" />
+                      ) : (
+                        <CheckCircle className="w-4 h-4 text-accent-safe" />
+                      )}
+                      <span className={cn(
+                        'text-sm',
+                        detailModal.alert.status === 'rejected' ? 'text-slate-400' : 'text-accent-safe'
+                      )}>
+                        由 {detailModal.alert.resolvedBy || '系统'} 于 {dayjs(detailModal.alert.resolvedAt).format('YYYY-MM-DD HH:mm:ss')}
+                        {detailModal.alert.status === 'rejected' ? ' 驳回' : ' 处置'}
                       </span>
                     </div>
                     {detailModal.alert.resolutionNote}

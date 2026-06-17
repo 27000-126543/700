@@ -180,10 +180,15 @@ router.post('/:id/operate', (req, res) => {
       now,
       id,
     );
-    db.prepare(`UPDATE alerts SET status = 'resolved', resolved_at = ? WHERE id = ?`).run(
-      now,
-      flow.alert_id,
-    );
+    const rejectNote = `审批驳回：${operatorName}在第${step}步驳回申请，原因：${comment || '未填写原因'}`;
+    db.prepare(
+      `UPDATE alerts 
+       SET status = 'rejected', 
+           resolved_at = ?, 
+           resolved_by = ?, 
+           resolution_note = ? 
+       WHERE id = ?`,
+    ).run(now, operatorId || 'system', rejectNote, flow.alert_id);
     return success(res, null, '审批已驳回');
   }
 

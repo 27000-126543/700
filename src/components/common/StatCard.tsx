@@ -9,7 +9,7 @@ interface StatCardProps {
   icon?: ReactNode;
   trend?: number;
   trendLabel?: string;
-  color?: 'blue' | 'green' | 'red' | 'orange' | 'purple' | 'gold';
+  color?: 'blue' | 'green' | 'red' | 'orange' | 'purple' | 'gold' | 'gray';
   className?: string;
   onClick?: () => void;
 }
@@ -50,6 +50,12 @@ const colorSchemes = {
     border: 'border-accent-gold/30',
     icon: 'bg-accent-gold/20 text-accent-gold',
     value: 'text-amber-200',
+  },
+  gray: {
+    bg: 'from-slate-600/20 to-slate-800/10',
+    border: 'border-slate-600/30',
+    icon: 'bg-slate-600/20 text-slate-400',
+    value: 'text-slate-300',
   },
 };
 
